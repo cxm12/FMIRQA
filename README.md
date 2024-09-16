@@ -1,5 +1,5 @@
-# UniFMIR
-"Pre-training a Foundation Model for Universal Fluorescence Microscopymage Restoration"
+# FMIRQA
+"Foundation model guided fluorescence microscopy image assessment"
 
 ### Requirements
 * Python 3.7
@@ -21,40 +21,15 @@
   
 csbdeep [![PyPI version](https://badge.fury.io/py/csbdeep.svg)](https://pypi.org/project/csbdeep)
 
-### Pretrain the UniFMIR model
 
-```
-cd <directory of the .py file>
-python mainUni_pretrain.py
-```
-Replacing "srdatapath", "denoisedatapath", "isodatapath", "prodatapath"， "voldatapath" with the folder name containing pre-training images for different tasks.
-
-
-### Finetune the UniFMIR model
-
-#### 3D denoising
-
-```
-cd <directory of the .py file>
-python mainUni.py
-```
-* Modify `mainUni.py` 
-  
-  task = 2
-  test_only = False
-  
-  Replacing "srdatapath", "denoisedatapath", "isodatapath", "prodatapath"， "voldatapath" with the folder name containing 
-  pre-training images for different tasks.
-  
-  
 ### Prediction
 Test the UniFMIR model on the 3D denoising task
 
 ```
 cd <directory of the .py file>
-python mainUni.py
+python mainUni2IQA.py
 ```
-Replacing "rootdatapath" with the folder name containing pre-training images.
+Replacing "inputpath" with the folder name containing images, need to be measured.
   
 
 
@@ -72,11 +47,6 @@ test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/
 
 train: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/train
 test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test
-
-* The Volumetric reconstruction dataset can be downloaded from `https://doi.org/10.5281/zenodo.4390067`
-
-train: /mnt/home/user1/MCX/Medical/VCD-Net-main/vcdnet/vcd-example-data/data/train
-test: /mnt/home/user1/MCX/Medical/VCD-Net-main/vcdnet/vcd-example-data/data/to_predict
 
 ### Model
 The pretrained models can be downloaded from `https://pan.baidu.com/`
