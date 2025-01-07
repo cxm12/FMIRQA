@@ -24,7 +24,7 @@ csbdeep [![PyPI version](https://badge.fury.io/py/csbdeep.svg)](https://pypi.org
 
 ### Prediction
 Evaluating the quality of super-resolution results
-Download the pretrained models from ` `. Place the file in this project. 
+Download the pretrained models from `https://pan.baidu.com/s/1_NBMYfPrMylp71DPJFtcJg?pwd=ohe5`. Place the file in the model file. 
 
 ```
 cd <directory of the .py file>
@@ -50,5 +50,5 @@ train: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-
 test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test
 
 ### Model
-The pretrained models can be downloaded from `  `
+The pretrained models can be downloaded from `https://pan.baidu.com/s/1_NBMYfPrMylp71DPJFtcJg?pwd=ohe5`
 
