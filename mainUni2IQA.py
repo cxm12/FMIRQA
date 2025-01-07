@@ -69,13 +69,13 @@ def get_data_loader():
 def loadUniFMIRgpu():
     kwargs = {}
     if testset == 'Microtubules':
-        modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIR%s/Ep101_data10/model_best.pt' % testset
+        modelpath = './model/experiment/SwinIR%s/model_best.pt' % testset
     if testset == 'CCPs':
-        modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIR%s/Ep101_data10/model_best.pt' % testset
+        modelpath = './model/experiment/SwinIR%s/model_best.pt' % testset
     if testset == 'F-actin':
-        modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIR%s/testevery1/P128B4/Ep101_data10/model_best.pt' % testset
+        modelpath = './model/experiment/SwinIR%s/model_best181.pt' % testset
     if testset == 'ER':
-        modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIR%s/server2/P128B1/model_best90.pt' % testset
+        modelpath = './model/experiment/SwinIR%s/model_best147.pt' % testset
 
     print('Load Model from ', modelpath)
     _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
