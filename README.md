@@ -25,7 +25,7 @@ csbdeep [![PyPI version](https://badge.fury.io/py/csbdeep.svg)](https://pypi.org
 ### Prediction
 Evaluating the quality of super-resolution results
 Download the pretrained models from ` `. Place the file in this project. 
-Replace the checkpoint path with the path to save the SR-GT model.
+
 ```
 cd <directory of the .py file>
 python mainUni2IQA.py
@@ -50,5 +50,5 @@ train: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-
 test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test
 
 ### Model
-The pretrained models can be downloaded from `https://github.com/cxm12/UNiFMIR/releases/download/2023.10.05/model.tgz`
+The pretrained models can be downloaded from `  `
 
