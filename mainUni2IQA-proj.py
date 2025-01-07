@@ -4,9 +4,8 @@ import torch
 import utility
 torch.backends.cudnn.enabled = False
 import argparse
-from mydataIQA import np, normalize, PercentileNormalizer, Flouresceneproj
+from mydataIQA import *
 import os
-from utility import savecolorim
 import math
 from torch.utils.data import dataloader
 import model
@@ -15,7 +14,7 @@ import model
 def options():
     parser = argparse.ArgumentParser(description='FMIR Model')
     parser.add_argument('--model', default='Uni-SwinIR', help='model name')
-    parser.add_argument('--task', type=int, default=task)
+    parser.add_argument('--task', type=int, default=4)
     parser.add_argument('--resume', type=int, default=0, help='')
     parser.add_argument('--save', type=str, default='', help='_itefile name to save')
     parser.add_argument('--load', type=str, default='', help='file name to load')
@@ -58,11 +57,28 @@ def options():
     return args
 
 
-def loadUniFMIRgpu():
-    kwargs = {}
-    modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIRProjection_Flywing/testevery1/server2/P128B1/model_best59.pt'
-    print('Load Model from ', modelpath)
-    _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
+class Flouresceneproj(data.Dataset):
+    def __init__(self, inputpath, reconstructedpath):
+        self.nm_lr = glob.glob(inputpath + '*.tif')
+        self.nm_rec = glob.glob(reconstructedpath + '*.tif')
+
+        self.lenth = len(self.nm_lr)
+        print('++ ++ ++ ++ ++ ++ self.length of test images = ', self.lenth, '++ ++ ++ ++ ++ ++')
+        
+    def __getitem__(self, idx):
+        filename, i = os.path.splitext(os.path.basename(self.nm_lr[idx]))
+        lr = np.float32(imread(self.nm_lr[idx]))
+        rec = np.expand_dims(np.float32(imread(self.nm_rec[idx])), 0)
+
+        if len(rec.shape) < 3:
+            rec = np.expand_dims(rec, 0)
+                
+        lr = torch.from_numpy(np.ascontiguousarray(lr)).float()
+        rec = torch.from_numpy(np.ascontiguousarray(rec)).float()
+        return lr, rec, filename
+    
+    def __len__(self):
+        return self.lenth
     
     
 class Trainer():
@@ -75,49 +91,42 @@ class Trainer():
         self.loader_test = loader_test
         self.model = my_model
         self.normalizer = PercentileNormalizer(2, 99.8)  # 逼近npz
-        self.normalizerhr = PercentileNormalizer(2, 99.8)
         
-    # # -------------------------- Projection --------------------------
-    def testproj(self):
+    def test(self):
         torch.set_grad_enabled(False)
         self.model.eval()
         datamin, datamax = self.args.datamin, self.args.datamax
         pslstref = []
         sslstref = []
         nmlst = []
-        axes_restored = 'YX'
-        for idx_data, (lrt, srt, hrt, filename) in enumerate(self.loader_test[0]):
+        for idx_data, (lrt, srt, filename) in enumerate(self.loader_test[0]):
             name = '{}'.format(filename[0])
             nmlst.append(name)
-            [srt] = self.prepare(srt)
+            lrt, srt = self.prepare(lrt, srt)
             b, c, h, w = srt.shape
-            SR_sr_stg1, SR_srt = self.model(srt.expand(b, 50, h, w), task)
+            
+            _, SRGTt = self.model(lrt.expand(b, 50, h, w), 4)
 
             sr = np.float32(np.squeeze(srt.cpu().detach().numpy()))
-            SR_sr = np.float32(np.squeeze(SR_srt.cpu().detach().numpy()))
-            utility.save_tiff_imagej_compatible(testsave + name + '-SR_SR.tif', SR_sr, axes_restored)
+            SRGT = np.float32(np.squeeze(SRGTt.cpu().detach().numpy()))
             
             sr255 = np.float32(normalize(sr, datamin, datamax, clip=True)) * 255
-            SR_sr255 = np.float32(normalize(np.float32(SR_sr), datamin, datamax, clip=True)) * 255            
-            ps255ref, ss255ref = utility.compute_psnr_and_ssim(sr255, SR_sr255)
-            # print('2D img Norm-%s - PSNR/SSIM = %f/%f' % (name, ps255ref, ss255ref))
-            # savecolorim(testsave + name[:-4] + '-SR_SR.png', SR_sr, norm=False)
-            savecolorim(testsave + name[:-4] + '-df_Input_SR_SR.png', np.clip(np.abs(SR_sr255 - sr255), 0, 255), norm=False)
-            
-            if math.isinf(ps255ref): ps255ref = 100
+            SRGT255 = np.float32(normalize(SRGT, datamin, datamax, clip=True)) * 255    
+                    
+            ps255ref, ss255ref = utility.compute_psnr_and_ssim(sr255, SRGT255)
             pslstref.append(ps255ref)
             sslstref.append(ss255ref)
             
         psnrmeanref = np.mean(pslstref)
         ssimmeanref = np.mean(sslstref)
-        file = open(testsave + "Psnrssim_RefSR_of_SR_UniFMIR_c%d.txt" % condition, 'w')
-        file.write('Mean between input and SR(input) = ' + str(psnrmeanref) + str(ssimmeanref))
-        file.write('\nName \n' + str(nmlst) 
-                    + '\n PSNR between input and SR(input) \n' + str(pslstref)
-                    + '\n SSIM \n' + str(sslstref))
-        file.close()
         print(testset, 'num = ', len(self.loader_test[0]),
               '+++++++++ condition %d ++++++++++++' % condition, psnrmeanref, ssimmeanref)
+        file = open(testsave + "AssHall-PSNRSSIM-C%d.txt" % condition, 'w')
+        file.write('Mean = ' + str(psnrmeanref) + str(ssimmeanref))
+        file.write('\nName \n' + str(nmlst)
+                    + '\n AssHall(PSNR) \n' + str(pslstref)
+                    + '\n AssHall(SSIM) \n' + str(sslstref))
+        file.close()
         torch.set_grad_enabled(True)
     
     def prepare(self, *args):
@@ -130,22 +139,27 @@ class Trainer():
     
 
 if __name__ == '__main__':
-    task = 4
     testset = 'Projection_Flywing'
-    for condition in range(2, 4):
-        inputpathGT = '/mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/%s/test_data/GT/C%d/' % (testset, condition)
-        method = 'CARE'
-        inputpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/projection/results/C%d/' % (condition)
-        testsave = './result_IQA/task%d_%s/%s/C%d/' % (task, testset, method, condition)
+    for condition in range(0, 4):
+        inputpath = ''
+        reconstructedpath = ''
+        
+        modelpath = './model/checkpoint/Projection/model_best.pt'
+    
+        testsave = './result_IQA/%s/' % testset
         os.makedirs(testsave, exist_ok=True)
 
         args = options()
         torch.manual_seed(args.seed)
-        unimodel = model.UniModel(args, tsk=task)
+        unimodel = model.UniModel(args, tsk=4)
         _model = model.Model(args, unimodel, rp='./')
         loader_test = [dataloader.DataLoader(
-            Flouresceneproj(LRpath=inputpath, name=testset, condition=condition),
+            Flouresceneproj(inputpath, reconstructedpath),
             batch_size=1, shuffle=False, pin_memory=True, num_workers=0)]
-        loadUniFMIRgpu()
+        
+        kwargs = {}        
+        print('Load Model from ', modelpath)
+        _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
+    
         t = Trainer(args, loader_test, args.data_test, _model)
-        t.testproj(condition)
+        t.test()
