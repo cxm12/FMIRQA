@@ -4,8 +4,7 @@ import torch
 import utility
 torch.backends.cudnn.enabled = False
 import argparse
-from mydataIQA import imsave, normalize, PercentileNormalizer, Flourescenedenoise
-from utility import savecolorim
+from mydataIQA import *
 import os
 import numpy as np
 from torch.utils.data import dataloader
@@ -15,7 +14,7 @@ import model
 def options():
     parser = argparse.ArgumentParser(description='FMIR Model')
     parser.add_argument('--model', default='Uni-SwinIR', help='model name')
-    parser.add_argument('--task', type=int, default=task)
+    parser.add_argument('--task', type=int, default=2)
     parser.add_argument('--resume', type=int, default=0, help='resume of IQA model')
     parser.add_argument('--save', type=str, default='', help='_itefile name to save')
     parser.add_argument('--load', type=str, default='', help='file name to load')
@@ -58,153 +57,108 @@ def options():
     return args
 
 
-def loadUniFMIRgpu():
-    kwargs = {}
-    if testset == 'Denoising_Planaria':
-        modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIR%s/testevery1/P64B16/model_best100.pt' % testset
-    if testset == 'Denoising_Tribolium':
-        modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/'\
-                    'experiment/Uni-SwinIR%s/server2/testevery1/P64B16/Ep101_data10/model_best.pt' % testset
-    _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
-    print('Load Model from ', modelpath)
+class Flourescenedenoise(data.Dataset):
+    def __init__(self, noisepath='', reconstructedpath=''):
+        self.datamin, self.datamax = 0, 100
+
+        self.nm_denoise = sorted(glob.glob(reconstructedpath + '/*.tif'))
+        self.nm_noise = sorted(glob.glob(noisepath + '/*.tif'))
+        self.lenth = len(self.nm_noise)
+        
+    def __getitem__(self, idx):
+        filename, fmt = os.path.splitext(os.path.basename(self.nm_noise[idx]))
+        noise = np.float32(imread(self.nm_noise[idx]))       
+        denoise = np.float32(imread(self.nm_denoise[idx]))
+        # print(noise.shape)  # [depth, H, W]
+        # # denoise = denoise[:20, :64, :64]
+        # # noise = noise[:20, :64, :64]
+        noise = torch.from_numpy(np.ascontiguousarray(noise)).float()
+        denoise = torch.from_numpy(np.ascontiguousarray(denoise)).float()
+        return noise, denoise, filename
+    
+    def __len__(self):
+        return self.lenth
 
 
 class Trainer():
-    def __init__(self, args, loader_test, datasetname, my_model):
+    def __init__(self, args, loader_test, my_model):
         self.args = args
         gpu = torch.cuda.is_available()
         self.device = torch.device('cpu' if (not gpu) else 'cuda')
         self.scale = args.scale
-        self.datasetname = datasetname
         self.loader_test = loader_test
         self.model = my_model
-        self.normalizer = PercentileNormalizer(2, 99.8)  # 逼近npz
+        self.normalizer = PercentileNormalizer(2, 99.8)
         
-    # # -------------------------- 3D denoise --------------------------
-    def test3Ddenoise(self, data_test='Denoising_Tribolium'):
-        file = open(testsave + "Psnrssim_RefUniFMIR_c%d.txt"% condition, 'w')
-        datamin, datamax = self.args.datamin, self.args.datamax
-        patchsize = 600
+    def test(self):
+        file = open(testsave + "AssHall-PSNRSSIM-C%d.txt"% condition, 'w')
         torch.set_grad_enabled(False)
         self.model.eval()
         
         sslst = []
         pslst = []
         nmlst = []
-        for idx_data, (_, srt, _, filename) in enumerate(self.loader_test[0]):
+        for idx_data, (noiset, denoiset, filename) in enumerate(self.loader_test[0]):
             nmlst.append(filename)
-            name = filename[0]
                         
-            srt = self.normalizer.before(srt, 'CZYX')  # [0~806] -> [0~1.]
-            [srt] = self.prepare(srt)
-            sr = np.squeeze(srt.cpu().detach().numpy())
-            denoiseim = torch.zeros_like(srt, dtype=srt.dtype)
+            denoiset = self.normalizer.before(denoiset, 'CZYX')
+            [noiset, denoiset] = self.prepare(noiset, denoiset)
+            denoise = np.squeeze(denoiset.cpu().detach().numpy())
+            denoise255 = np.float32(normalize(denoise, 0, 100, clip=True)) * 255
+            
+            noise = np.squeeze(noiset.cpu().detach().numpy())
+            denoiseimGT = torch.zeros_like(noiset, dtype=noiset.dtype)
             
             batchstep = 5  # 10  #
             inputlst = []
-            for ch in range(0, len(sr)):  # [45, 486, 954]  0~44
-                if ch < 5 // 2:  # 0, 1
-                    sr1 = [srt[:, ch:ch + 1, :, :] for _ in range(5 // 2 - ch)]
-                    sr1.append(srt[:, :5 // 2 + ch + 1])
-                    srt1 = torch.concat(sr1, 1)  # [B, inputchannel, h, w]
-                elif ch >= (len(sr) - 5 // 2):  # 43, 44
-                    sr1 = []
-                    sr1.append(srt[:, ch - 5 // 2:])
-                    numa = (5 // 2 - (len(sr) - ch)) + 1
-                    sr1.extend([srt[:, ch:ch + 1, :, :] for _ in range(numa)])
-                    srt1 = torch.concat(sr1, 1)  # [B, inputchannel, h, w]
+            for ch in range(0, len(noise)):
+                if ch < 5 // 2:
+                    noise1 = [noiset[:, ch:ch + 1, :, :] for _ in range(5 // 2 - ch)]
+                    noise1.append(noiset[:, :5 // 2 + ch + 1])
+                    noiset1 = torch.concat(noise1, 1)  # [B, inputchannel, h, w]
+                elif ch >= (len(noise) - 5 // 2):
+                    noise1 = []
+                    noise1.append(noiset[:, ch - 5 // 2:])
+                    numa = (5 // 2 - (len(noise) - ch)) + 1
+                    noise1.extend([noiset[:, ch:ch + 1, :, :] for _ in range(numa)])
+                    noiset1 = torch.concat(noise1, 1)  # [B, inchannel, h, w]
                 else:
-                    srt1 = srt[:, ch - 5 // 2:ch + 5 // 2 + 1]
-                assert srt1.shape[1] == 5
-                inputlst.append(srt1)
+                    noiset1 = noiset[:, ch - 5 // 2:ch + 5 // 2 + 1]
+                assert noiset1.shape[1] == 5
+                inputlst.append(noiset1)
             
             for dp in range(0, len(inputlst), batchstep):
-                if dp + batchstep >= len(sr):
-                    dp = len(sr) - batchstep
-                # print(dp)  # 0, 10, .., 90
-                srtn = torch.concat(inputlst[dp:dp + batchstep], 0)  # [batch, inputchannel, h, w]
-                a = self.model(srtn, task)
-                a = torch.transpose(a, 1, 0)  # [1, batch, h, w]
-                denoiseim[:, dp:dp + batchstep, :, :] = a
+                if dp + batchstep >= len(noise):
+                    dp = len(noise) - batchstep
+                noisetn = torch.concat(inputlst[dp:dp + batchstep], 0)  # [batch, inchannel, h, w]
+                a = self.model(noisetn, 2)
+                denoiseimGT[:, dp:dp + batchstep, :, :] = torch.transpose(a, 1, 0)  # [1, batch, h, w]
             
-            SR_sr = np.float32(denoiseim.cpu().detach().numpy())
-            sr = np.squeeze(self.normalizer.after(sr))
-            SR_sr = np.squeeze(self.normalizer.after(SR_sr))
-            imsave(testsave + name + '-SR_SR.tif', SR_sr)
+            denoiseimGT = np.float32(denoiseimGT.cpu().detach().numpy())
+            denoiseimGT = np.squeeze(self.normalizer.after(denoiseimGT))
+            denoiseGT255 = np.float32(normalize(denoiseimGT, 0, 100, clip=True)) * 255
             
-            sr255 = np.float32(normalize(sr, 0, 100, clip=True)) * 255
-            SR_sr255 = np.float32(normalize(SR_sr, 0, 100, clip=True)) * 255
-                        
-            cpsnrlst = []
-            cssimlst = []            
-            step = 1
-            if 'Planaria' in data_test:
-                if condition == 1:
-                    randcs = 10
-                    randce = sr.shape[0] - 10
-                    step = (sr.shape[0] - 20) // 5
-                else:
-                    randcs = 85
-                    randce = 87
-                    step = 1
-                    if randce >= sr.shape[0]:
-                            randcs = sr.shape[0] - 3
-                            randce = sr.shape[0]
-
-                for dp in range(randcs, randce, step):
-                        savecolorim(testsave + name + '-SR_SRD%d.png' % dp, SR_sr[dp], norm=False)
-                        SR_sr2 = np.round(np.maximum(0, np.minimum(255, SR_sr[dp])))
-                        sr2 = np.round(np.maximum(0, np.minimum(255, sr[dp])))
-                        savecolorim(testsave + name + '-df_Input_SR_SRD%d.png' % dp, 
-                                    np.clip(np.abs(SR_sr2 - sr2), 0, 255), norm=False)
-            
-                        srpatch255 = sr255[dp, :patchsize, :patchsize]
-                        SR_srpatch255 = SR_sr255[dp, :patchsize, :patchsize]
-                        psm, ssmm = utility.compute_psnr_and_ssim(srpatch255, SR_srpatch255)
-                        # print('SR Image %s - C%d- PSNR/SSIM = %f/%f' % (name, dp, psm, ssmm))
-                        cpsnrlst.append(psm)
-                        cssimlst.append(ssmm)
-                        
-            elif 'Tribolium' in data_test:
-                    if condition == 1:
-                        randcs = 2
-                        randce = sr.shape[0] - 2
-                        step = (sr.shape[0] - 4) // 6
-                    else:
-                        randcs = sr.shape[0] // 2 - 1
-                        randce = randcs + 3
-                        step = 1
-                    
-                    for randc in range(randcs, randce, step):
-                        savecolorim(testsave + name + '-SR_SRD%d.png' % randc, SR_sr[randc], norm=False)
-                        SR_sr2 = np.round(np.maximum(0, np.minimum(255, SR_sr[randc])))
-                        sr2 = np.round(np.maximum(0, np.minimum(255, sr[randc])))
-                        savecolorim(testsave + name + '-df_Input_SR_SRD%d.png' % randc, 
-                                    np.clip(np.abs(SR_sr2 - sr2), 0, 255), norm=False)
-                        
-                        SR_srpatch255 = normalize(SR_sr255[randc, :patchsize, :patchsize], datamin, datamax, clip=True) * 255
-                        srpatch255 = normalize(sr255[randc, :patchsize, :patchsize], datamin, datamax, clip=True) * 255
-                        psm, ssmm = utility.compute_psnr_and_ssim(srpatch255, SR_srpatch255)
-                        # print('SR Image %s - C%d- PSNR/SSIM = %f/%f' % (name, randc, psm, ssmm))
-                        cpsnrlst.append(psm)
-                        cssimlst.append(ssmm)                     
-            
-            sslst.append(np.mean(np.array(cssimlst)))
-            pslst.append(np.mean(np.array(cpsnrlst)))
+            cplst = []
+            cslst = []
+            for dp in range(0, len(inputlst), batchstep):
+                psm, ssmm = utility.compute_psnr_and_ssim(denoise255[dp], denoiseGT255[dp])
+                cplst.append(psm)
+                cslst.append(ssmm)
+            pslst.append(np.mean(cplst))
+            sslst.append(np.mean(cslst))
         
         psnrmeanref = np.mean(pslst)
         ssimmeanref = np.mean(sslst)
         print(psnrmeanref, ssimmeanref)
-        file = open(testsave + "%sC%dPsnrssim_RefSR_of_SR_UniFMIR.txt" % (method, condition), 'w')
-        file.write('\n \n +++++++++ condition%d meanSR ++++++++++++ \n PSNR/SSIM \n  patchsize = %d \n' % (
-                condition, patchsize))
-        file.write('Mean between input and SR(input) = ' + str(psnrmeanref) + str(ssimmeanref))
+        file = open(testsave + "C%d.txt" % (condition), 'w')
+        file.write('\n \n +++++++++ condition%d ++++++++++++ \n' % (condition))
+        file.write('Mean = ' + str(psnrmeanref) + str(ssimmeanref))
         file.write('\nName \n' + str(nmlst)
-                    + '\n PSNR between input and SR(input) \n' + str(pslst)
-                    + '\n SSIM \n' + str(sslst))
+                    + '\n AssHall(PSNR) \n' + str(pslst)
+                    + '\n AssHall(SSIM) \n' + str(sslst))
         file.close()
         print(testset, '+++++++++ condition%d++++++++++++' % condition, 'num = ', len(self.loader_test[0]) 
-              , '\n ssimmeanref/psnrmeanref = ', psnrmeanref, ssimmeanref)
+              , 'Mean = ' + str(psnrmeanref) + str(ssimmeanref))
 
     def prepare(self, *args):
         def _prepare(tensor):
@@ -215,23 +169,26 @@ class Trainer():
 
 
 if __name__ == '__main__':
-    task = 2
     condition = 2
-    method = 'CARE'
-    for testset in ['Denoising_Planaria']:  # 'Denoising_Tribolium', 
-        inputpathGT = '/mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/%s/test_data/GT/' % (testset)
-        inputpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/denoising2D/models/epoch200/my_model/%s/result/Norm_0-100/condition_%d/' % (testset, condition)
-
-        testsave = './result_IQA/task%d_%s/%s/C%d/' % (task, testset, method, condition)
+    for testset in ['Tribolium', 'Planaria']:
+        denoisepath = ''
+        noisepath = ''
+        modelpath = './model/checkpoint/denoise/%s/model_best.pt' % testset
+    
+        testsave = './result_IQA/%s/' % testset
         os.makedirs(testsave, exist_ok=True)
 
         args = options()
         torch.manual_seed(args.seed)
-        unimodel = model.UniModel(args, tsk=task)
+        unimodel = model.UniModel(args, tsk=2)
         _model = model.Model(args, unimodel, rp='./')
         loader_test = [dataloader.DataLoader(
-            Flourescenedenoise(LRpath=inputpath, name=testset, c=condition),
+            Flourescenedenoise(noisepath=noisepath, reconstructedpath=denoisepath),
             batch_size=1, shuffle=False, pin_memory=True, num_workers=0)]
-        loadUniFMIRgpu()
-        t = Trainer(args, loader_test, args.data_test, _model)
-        t.test3Ddenoise()
+        
+        kwargs = {}
+        _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
+        print('Load Model from ', modelpath)
+        
+        t = Trainer(args, loader_test, _model)
+        t.test()
