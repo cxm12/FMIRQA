@@ -4,9 +4,8 @@ import torch
 import utility
 torch.backends.cudnn.enabled = False
 import argparse
-from mydataIQA import imsave, np, normalize, PercentileNormalizer, Flouresceneiso
+from mydataIQA import *
 import os
-from utility import savecolorim1
 from torch.utils.data import dataloader
 import model
 
@@ -14,7 +13,7 @@ import model
 def options():
     parser = argparse.ArgumentParser(description='FMIR Model')
     parser.add_argument('--model', default='Uni-SwinIR', help='model name')
-    parser.add_argument('--task', type=int, default=task)
+    parser.add_argument('--task', type=int, default=3)
     parser.add_argument('--resume', type=int, default=0, help='-2:best;-1:latest; 0:pretrain; >0: resume')
     parser.add_argument('--save', type=str, default='', help='_itefile name to save')
     parser.add_argument('--load', type=str, default='', help='file name to load')
@@ -57,27 +56,44 @@ def options():
     return args
 
 
-def loadUniFMIRgpu(_model):
-    kwargs = {}
-    modelpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/BioSR/ENLCA/Uni-FMIR/experiment/Uni-SwinIRIsotropic_Liver/server2/testevery1/P64B32/Ep101_data10/model_best93.pt'
-    print('Load Model from ', modelpath)
-    _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
-    return _model
+class Flouresceneiso(data.Dataset):
+    def __init__(self, INpath='', reconstructedpath=''):
+        self.datamin, self.datamax = 0, 100
+        self.nm_rec = [INpath]
+        self.nm_in = [reconstructedpath]
+            
+    def __getitem__(self, idx):
+        filename, i = os.path.splitext(os.path.basename(self.nm_rec[idx]))
+        lr = np.float32(imread(self.nm_in[idx]))
+        sr = np.float32(imread(self.nm_rec[idx]))
+        
+        if 'Retina' in self.nm_in[idx]:
+            lr = np.transpose(zoom(lr, (10.2, 1, 1, 1), order=1), [0, 2, 3, 1])
+        
+        # print(lr.shape)  # (301, 752, 752)
+        # print(sr.shape)  # (301, 752, 752)
+        # lr = lr[:101, :, :]
+        # sr = sr[:101, :, :]
+        
+        lr = torch.from_numpy(np.ascontiguousarray(lr)).float()
+        sr = torch.from_numpy(np.ascontiguousarray(sr)).float()
+        return lr, sr, filename
+    
+    def __len__(self):
+        return 1
 
 
 class Trainer():
-    def __init__(self, args, loader_test, datasetname, my_model):
+    def __init__(self, args, loader_test, my_model):
         self.args = args
         gpu = torch.cuda.is_available()
         self.device = torch.device('cpu' if (not gpu) else 'cuda')
         self.scale = args.scale
-        self.datasetname = datasetname
         self.loader_test = loader_test
         self.model = my_model
         self.normalizer = PercentileNormalizer(2, 99.8)  # 逼近npz
 
-    # # -------------------------- Isotropic Reconstruction --------------------------
-    def testiso(self):
+    def test(self):
         def _rotate(arr, k=1, axis=1, copy=True):
             """Rotate by 90 degrees around the first 2 axes."""
             if copy:
@@ -102,78 +118,76 @@ class Trainer():
         pslstref = []
         sslstref = []
         nmlst = []
-        for idx_data, (lrt, srt, hrt, filename) in enumerate(self.loader_test[0]):
+        for idx_data, (lrt, srt, filename) in enumerate(self.loader_test[0]):
             num += 1
             name = '{}'.format(filename[0])
             nmlst.append(name)
             srt = self.normalizer.before(srt, 'CZYX')
+            lrt = self.normalizer.before(lrt, 'CZYX')
 
-            [srt] = self.prepare(srt)  # [B, 301, 752, 752]
-            sr = np.float32(np.squeeze(srt.cpu().detach().numpy()))
-            if len(sr.shape) <= 3: sr = np.expand_dims(sr, -1)
-            isoim1 = np.zeros_like(sr, dtype=np.float32)  # [301, 752, 752, 2]
-            isoim2 = np.zeros_like(sr, dtype=np.float32)
+            srt, lrt = self.prepare(srt, lrt)  # [B, 301, 752, 752]
+            sr = np.float32(srt.cpu().detach().numpy())
+            sr = np.squeeze(self.normalizer.after(sr))
+
+            lr = np.float32(np.squeeze(lrt.cpu().detach().numpy()))
+            if len(lr.shape) <= 3: lr = np.expand_dims(lr, -1)
+            isoim1 = np.zeros_like(lr, dtype=np.float32)  # [301, 752, 752, 2]
+            isoim2 = np.zeros_like(lr, dtype=np.float32)
             
             batchstep = 100
-            for wp in range(0, sr.shape[2], batchstep):
-                if wp + batchstep >= sr.shape[2]:
-                    wp = sr.shape[2] - batchstep
-                x_rot1 = _rotate(sr[:, :, wp:wp + batchstep, :], axis=1, copy=False)
+            for wp in range(0, lr.shape[2], batchstep):
+                if wp + batchstep >= lr.shape[2]:
+                    wp = lr.shape[2] - batchstep
+                x_rot1 = _rotate(lr[:, :, wp:wp + batchstep, :], axis=1, copy=False)
                 x_rot1 = np.expand_dims(np.squeeze(x_rot1), 1)
                 x_rot1 = torch.from_numpy(np.ascontiguousarray(x_rot1)).float()
                 x_rot1 = self.prepare(x_rot1)[0]
-                a1 = self.model(x_rot1, task)
+                a1 = self.model(x_rot1, 3)
                 
                 a1 = np.expand_dims(np.squeeze(a1.cpu().detach().numpy()), -1)
                 u1 = _rotate(a1, -1, axis=1, copy=False)
                 isoim1[:, :, wp:wp + batchstep, :] = u1
                 
-            for hp in range(0, sr.shape[1], batchstep):
-                if hp + batchstep >= sr.shape[1]:
-                    hp = sr.shape[1] - batchstep
+            for hp in range(0, lr.shape[1], batchstep):
+                if hp + batchstep >= lr.shape[1]:
+                    hp = lr.shape[1] - batchstep
                 
-                x_rot2 = _rotate(_rotate(sr[:, hp:hp + batchstep, :, :], axis=2, copy=False), axis=0, copy=False)
+                x_rot2 = _rotate(_rotate(lr[:, hp:hp + batchstep, :, :], axis=2, copy=False), axis=0, copy=False)
                 x_rot2 = np.expand_dims(np.squeeze(x_rot2), 1)
                 x_rot2 = torch.from_numpy(np.ascontiguousarray(x_rot2)).float()
-                a2 = self.model(self.prepare(x_rot2)[0], task)
+                a2 = self.model(self.prepare(x_rot2)[0], 3)
                 
                 a2 = np.expand_dims(np.squeeze(a2.cpu().detach().numpy()), -1)
                 u2 = _rotate(_rotate(a2, -1, axis=0, copy=False), -1, axis=2, copy=False)
                 isoim2[:, hp:hp + batchstep, :, :] = u2
                                                 
-            SR_sr = np.sqrt(np.maximum(isoim1, 0) * np.maximum(isoim2, 0))
-            SR_sr = np.squeeze(self.normalizer.after(SR_sr))
-            sr = np.squeeze(self.normalizer.after(sr))
-            imsave(testsave + name + 'SR-sr.tif', SR_sr)
+            SRGT = np.sqrt(np.maximum(isoim1, 0) * np.maximum(isoim2, 0))
+            SRGT = np.squeeze(self.normalizer.after(SRGT))
             c, h, w = sr.shape
             
             cpsnrlst = []
             cssimlst = []
             for dp in range(1, h, h // 5):
-                savecolorim1(testsave + name + '-dfnoNormCz%d.png' % dp, 
-                            sr[:, dp, :] - SR_sr[:, dp, :], norm=False)
-                # 5.2D norm0100 psnr
                 srpatch = normalize(sr[:, dp, :], datamin, datamax, clip=True) * 255
-                SR_srpatch = normalize(SR_sr[:, dp, :], datamin, datamax, clip=True) * 255
-                psm, ssmm = utility.compute_psnr_and_ssim(srpatch, SR_srpatch)
-                print('Patch %s - C%d- PSNR/SSIM/MSE = %f/%f' % (name, dp, psm, ssmm))
+                SRGTpatch = normalize(SRGT[:, dp, :], datamin, datamax, clip=True) * 255
+                psm, ssmm = utility.compute_psnr_and_ssim(srpatch, SRGTpatch)
+                print('Patch %s - C%d- PSNR/SSIM = %f/%f' % (name, dp, psm, ssmm))
                 cpsnrlst.append(psm)
                 cssimlst.append(ssmm)
             psnr1, ssim = np.mean(np.array(cpsnrlst)), np.mean(np.array(cssimlst))
-            # print('SR im:', psnr1, ssim)
             sslstref.append(ssim)
             pslstref.append(psnr1)
         
         psnrmeanref = np.mean(pslstref)
         ssimmeanref = np.mean(sslstref)
-        file = open(testsave + "Psnrssim_RefSR_of_SR_UniFMIR.txt", 'w')
-        file.write('Mean between input and SR(input) = ' + str(psnrmeanref) + str(ssimmeanref))
+        file = open(testsave + "AssHall-PSNRSSIM.txt", 'w')
+        file.write('Mean = ' + str(psnrmeanref) + str(ssimmeanref))
         file.write('\nName \n' + str(nmlst)
-                    + '\n PSNR between input and SR(input) \n' + str(pslstref)
-                    + '\n SSIM \n' + str(sslstref))
+                    + '\n AssHall(PSNR) \n' + str(pslstref)
+                    + '\n AssHall(SSIM) \n' + str(sslstref))
         file.close()
-        print(testset, 'num = ', len(self.loader_test[0]) 
-              , '\n ssimmeanref/psnrmeanref = ', psnrmeanref, ssimmeanref)
+        print(testset, 'num = ', len(self.loader_test[0])
+              , 'Mean = ' + str(psnrmeanref) + str(ssimmeanref))
 
     def prepare(self, *args):
         def _prepare(tensor):
@@ -185,24 +199,26 @@ class Trainer():
     
 
 if __name__ == '__main__':
-    task = 3
-    testset = 'Isotropic_Drosophila'  # ['Isotropic_Liver' , 'Isotropic_Retina', 'Isotropic_Drosophila']  #   #
-    if 'Liver' in testset:
-        inputpathGT = '/mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/Isotropic/%s/test_data/input_subsample_1_groundtruth.tif' % testset
-        inputpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/isotropic_reconstruction/models/epoch200/my_model/%s/result/AllT1/S1/input_subsample_8-Mean_ZYX.tif' % testset
-    else:
-        inputpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/examples/isotropic_reconstruction/models/epoch200/my_model/Isotropic_Retina/result/S10/'
-    method = 'CARE'
-    testsave = './result_IQA/task%d_%s/%s/' % (task, testset, method)
+    testset = 'Isotropic_Liver'
+    inputpath = ''
+    reconstructedpath= ''
+    modelpath = './model/checkpoint/isotropic/model_best.pt'
+    print('Load Model from ', modelpath)
+        
+    testsave = './result_IQA/%s/' % (testset)
     os.makedirs(testsave, exist_ok=True)
     
     args = options()
     torch.manual_seed(args.seed)
-    unimodel = model.UniModel(args, tsk=task)
+    unimodel = model.UniModel(args, tsk=3)
     _model = model.Model(args, unimodel, rp='./')
+    
     loader_test = [dataloader.DataLoader(
-        Flouresceneiso(LRpath=inputpath, name=testset),
+        Flouresceneiso(inputpath, reconstructedpath),
         batch_size=1, shuffle=False, pin_memory=True, num_workers=0)]
-    _model = loadUniFMIRgpu(_model)
-    t = Trainer(args, loader_test, args.data_test, _model)
-    t.testiso()
+    
+    kwargs = {}    
+    _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
+    
+    t = Trainer(args, loader_test, _model)
+    t.test()
