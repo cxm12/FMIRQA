@@ -49,5 +49,5 @@ train: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-
 test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test
 
 ### Model
-The pretrained models can be downloaded from `https://pan.baidu.com/`
+The pretrained models can be downloaded from `https://github.com/cxm12/UNiFMIR/releases/download/2023.10.05/model.tgz`
 
