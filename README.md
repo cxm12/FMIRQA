@@ -23,6 +23,8 @@ csbdeep [![PyPI version](https://badge.fury.io/py/csbdeep.svg)](https://pypi.org
 
 
 ### Prediction
+The proposed AssHall uses the well-trained models (UniFMIR [1]) and does not need additional training.
+
 Evaluating the quality of super-resolution results
 Download the pretrained models from `https://pan.baidu.com/s/1_NBMYfPrMylp71DPJFtcJg?pwd=ohe5`. Place the file in the model file. 
 
@@ -31,7 +33,6 @@ cd <directory of the .py file>
 python mainUni2IQA.py
 ```
 Replacing "inputpath" with the folder name containing images, need to be measured.
-  
 
 
 ### Data
@@ -39,16 +40,10 @@ All training and test data involved in the experiments are publicly available da
 
 * The 3D denoising/isotropic reconstruction/projection datasets can be downloaded from `https://publications.mpi-cbg.de/publications-sites/7207/`
 
-train: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/
-[Denoising_Planaria][Denoising_Tribolium][Isotropic/Isotropic_Liver][Projection_Flywing]/train_data
-test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/
-[Denoising_Planaria][Denoising_Tribolium][Isotropic/Isotropic_Liver][Projection_Flywing]/test_data
-
 * The SR dataset can be downloaded from `https://doi.org/10.6084/m9.figshare.13264793`
-
-train: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/train
-test: /mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test
 
 ### Model
 The pretrained models can be downloaded from `https://pan.baidu.com/s/1_NBMYfPrMylp71DPJFtcJg?pwd=ohe5`
 
+
+[1] Ma, C., Tan, W., He, R. et al. Pretraining a foundation model for generalizable fluorescence microscopy-based image restoration. Nat Methods 21, 1558–1567 (2024).
