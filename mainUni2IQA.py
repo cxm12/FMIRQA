@@ -4,18 +4,17 @@ import torch
 import utility
 torch.backends.cudnn.enabled = False
 import argparse
-from mydataIQA import np, normalize, PercentileNormalizer, SR
+from mydataIQA import *
 from torch.utils.data import dataloader
 import model
 import os
-from utility import savecolorim
-from torchvision.transforms import Resize
+# from torchvision.transforms import Resize
 
 
 def options():
     parser = argparse.ArgumentParser(description='FMIR Model')
     parser.add_argument('--model', default='Uni-SwinIR', help='model name')
-    parser.add_argument('--task', type=int, default=task)
+    parser.add_argument('--task', type=int, default=1)
     parser.add_argument('--resume', type=int, default=0, help='')
     parser.add_argument('--save', type=str, default='', help='_itefile name to save')
     parser.add_argument('--load', type=str, default='', help='file name to load')
@@ -58,28 +57,35 @@ def options():
     return args
 
 
-def get_data_loader():
-    loader_test = [dataloader.DataLoader(
-            SR(LRpath=inputpath, name=testset),
-            batch_size=1, shuffle=False, pin_memory=True, num_workers=0)]
-    
-    return loader_test
+class SR(data.Dataset):
+    def __init__(self, LRpath='', SRpath=''):
+        self.nm_sr = sorted(glob.glob(SRpath + '/*.tif'))
+        self.nm_lr = sorted(glob.glob(LRpath + '/*.tif'))
+        self.lenth = len(self.nm_lr)
 
+        for namepath in self.nm_sr:
+            self.name, _ = os.path.splitext(os.path.basename(namepath))
 
-def loadUniFMIRgpu():
-    kwargs = {}
-    if testset == 'Microtubules':
-        modelpath = './model/experiment/SwinIR%s/model_best.pt' % testset
-    if testset == 'CCPs':
-        modelpath = './model/experiment/SwinIR%s/model_best.pt' % testset
-    if testset == 'F-actin':
-        modelpath = './model/experiment/SwinIR%s/model_best181.pt' % testset
-    if testset == 'ER':
-        modelpath = './model/experiment/SwinIR%s/model_best147.pt' % testset
+    def getitem_IQA(self, idx):
+        lrnm, srnm, filename = self.nm_lr[idx], self.nm_sr[idx], self.name[idx]
+        lr = tiff.imread(lrnm)
+        sr = tiff.imread(srnm)
 
-    print('Load Model from ', modelpath)
-    _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
-   
+        if len(sr.shape) < 3:
+            sr = np.expand_dims(sr, -1)
+        if len(lr.shape) < 3:
+            lr = np.expand_dims(lr, -1)
+                        
+        lr = normalize(lr, 0, 100, clip=True) * 2 - 1
+        sr = normalize(sr, 0, 100, clip=True) * 2 - 1
+        srtensor = torch.from_numpy(np.ascontiguousarray(sr.transpose((2, 0, 1)))).float()
+        lrtensor = torch.from_numpy(np.ascontiguousarray(lr.transpose((2, 0, 1)))).float()
+        pair_t = [lrtensor, srtensor]
+        return pair_t[0], pair_t[1], filename
+
+    def __len__(self):
+        return len(self.name)
+
    
 class Trainer():
     def __init__(self, args, loader_test, datasetname, my_model):
@@ -91,11 +97,8 @@ class Trainer():
         self.loader_test = loader_test
         self.model = my_model
         self.normalizer = PercentileNormalizer(2, 99.8)  # 逼近npz
-        self.normalizerhr = PercentileNormalizer(2, 99.8)
         
-    # # -------------------------- SR --------------------------
-    def testSR_LR_PSNR(self):
-        # PSNR between input and SR(LR)
+    def test(self):
         self.model.scale = 2
         torch.set_grad_enabled(False)
         self.model.eval()
@@ -103,16 +106,12 @@ class Trainer():
         pslst = []
         sslst = []
         nmlst = []
-        for idx_data, (lr, sr, hr, filename) in enumerate(self.loader_test[0]):
+        for idx_data, (lr, sr, filename) in enumerate(self.loader_test[0]):
             nmlst.append(filename)
             lr, sr = self.prepare(lr, sr)
-            SR_lr = self.model(lr, task)
-            # image_tensor = torch.randn(3, 244, 244)  # 假设的图像tensor，大小为244x244
-            
-            resize_transform = Resize(size=256)  # 将图像resize到128x128
-            if method == 'Input':
-                sr = resize_transform(sr)
-                
+            SR_lr = self.model(lr, 1)
+            # resize_transform = Resize(size=256)
+            # sr = resize_transform(sr)
             SR_lr = utility.quantize(SR_lr, self.args.rgb_range)
             sr = utility.quantize(sr, self.args.rgb_range)
             sr = sr.mul(255 / self.args.rgb_range).detach().cpu().numpy()[0, 0, :, :]
@@ -124,19 +123,14 @@ class Trainer():
             sslst.append(ss255)
             print('name %s, ps255, ss255 = ' % filename[0], ps255, ss255)
             
-            name = filename[0]
-            savecolorim(testsave + name[:-4] + '.png', SR_lr, norm=False)
-            SR_lr2 = np.round(np.maximum(0, np.minimum(255, SR_lr)))
-            sr2 = np.round(np.maximum(0, np.minimum(255, sr)))
-            savecolorim(testsave + name[:-4] + '-df_Input_SRlr.png', np.clip(np.abs(SR_lr2 - sr2), 0, 255), norm=False)
         psnrmean = np.mean(pslst)
         ssimmean = np.mean(sslst)
-        file = open(testsave + "Psnrssim_RefSR_of_LR_UniFMIR.txt", 'w')
-        file.write('Mean between input and SR of LR = ' + str(psnrmean) + str(ssimmean))
-        file.write('\nName \n' + str(nmlst) + '\nPSNR between input and SR of LR \n' + str(pslst)
-                    + '\nSSIM \n' + str(sslst))
+        file = open(testsave + "AssHall-PSNRSSIM.txt", 'w')
+        file.write('Mean AssHall(PSNR/SSIM)= ' + str(psnrmean) + '/' + str(ssimmean))
+        file.write('\nName \n' + str(nmlst) + '\nAssHall(PSNR) \n' + str(pslst)
+                    + '\nAssHall(SSIM) \n' + str(sslst))
         file.close()
-        print(testset, 'num = ', len(self.loader_test[0]), '\n ssimmean/psnrmean = ', psnrmean, ssimmean)
+        print(testset, 'num = ', len(self.loader_test[0]), '\n Mean AssHall(PSNR/SSIM)= ', psnrmean, ssimmean)
 
     def prepare(self, *args):
         def _prepare(tensor):
@@ -148,19 +142,24 @@ class Trainer():
     
 
 if __name__ == '__main__':
-    task = 1
     testset = 'Microtubules'  # 'ER'  # 'F-actin'  # 'CCPs'  #
-    inputpathHR = '/mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test/%s/GT/' % testset
-    inputpath = '/mnt/home/user1/MCX/Medical/CSBDeep-master/DataSet/BioSR_WF_to_SIM/DL-SR-main/dataset/test/%s/output_DFCAN-SISR/' % testset
-    method = 'DFCAN'
-
-    testsave = './result_IQA/task%d_%s/%s/' % (task, testset, method)
+    inputpath = ''
+    reconstructpath = ''
+    
+    testsave = './result_IQA/%s/' % testset
     os.makedirs(testsave, exist_ok=True)
     args = options()
     torch.manual_seed(args.seed)
-    unimodel = model.UniModel(args, tsk=task)
+    unimodel = model.UniModel(args, tsk=1)
     _model = model.Model(args, unimodel, rp='./')
-    loader_test = get_data_loader()
-    loadUniFMIRgpu()
+    loader_test = [dataloader.DataLoader(
+            SR(inputpath, reconstructpath),
+            batch_size=1, shuffle=False, pin_memory=True, num_workers=0)]
+
+    kwargs = {}
+    modelpath = './model/checkpoint/SR/%s/model_best.pt' % testset
+    print('Load Model from ', modelpath)
+    _model.model.load_state_dict(torch.load(modelpath, **kwargs), strict=True)
+
     t = Trainer(args, loader_test, args.data_test, _model)
-    t.testSR_LR_PSNR()
+    t.test()
