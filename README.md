@@ -32,8 +32,9 @@ Download the pretrained models from `https://pan.baidu.com/s/1_NBMYfPrMylp71DPJF
 cd <directory of the .py file>
 python mainUni2IQA.py
 ```
-Replacing "reconstructpath" with the folder name containing AI-reconstructed images, which need to be measured. 
-Replacing "inputpath" with the folder name containing low-quality images, which are the input of the AI models. 
+Replacing "reconstructpath" with the folder name containing AI-reconstructed images (such as super-resolved images), which need to be measured. 
+
+Replacing "inputpath" with the folder name containing low-quality images (such as low-resolution images), which are the input of the AI models (such as super-resolution models) for generating AI-reconstructed images. 
 
 ### Data
 All training and test data involved in the experiments are publicly available datasets. 
