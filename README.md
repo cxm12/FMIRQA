@@ -24,7 +24,8 @@ csbdeep [![PyPI version](https://badge.fury.io/py/csbdeep.svg)](https://pypi.org
 
 ### Prediction
 Evaluating the quality of super-resolution results
-Download the pretrained models from `https://github.com/cxm12/UNiFMIR/releases/download/2023.10.05/model.tgz`. Replace the checkpoint path with the path to save the SR-GT model.
+Download the pretrained models from ` `. Place the file in this project. 
+Replace the checkpoint path with the path to save the SR-GT model.
 ```
 cd <directory of the .py file>
 python mainUni2IQA.py
