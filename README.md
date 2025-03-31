@@ -1,5 +1,5 @@
-# FMIRQA
-"Foundation model guided fluorescence microscopy image assessment"
+# Method
+"Assessing AI-Reconstructed Hallucinations in Fluorescence Microscopy Image"
 
 ### Requirements
 * Python 3.7
@@ -23,7 +23,7 @@ csbdeep [![PyPI version](https://badge.fury.io/py/csbdeep.svg)](https://pypi.org
 
 
 ### Prediction
-The proposed AssHall uses the well-trained models (UniFMIR [1]) and does not need additional training.
+The proposed HallAssess uses the well-trained models (UniFMIR [1]) and does not need additional training.
 
 Evaluating the quality of super-resolution results
 Download the pretrained models from `https://pan.baidu.com/s/1_NBMYfPrMylp71DPJFtcJg?pwd=ohe5`. Place the file in the model file. 
