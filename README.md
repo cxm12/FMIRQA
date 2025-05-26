@@ -1,5 +1,5 @@
 # Method
-"Assessing AI-Reconstructed Hallucinations in Fluorescence Microscopy Image"
+"UniFMIR-QA"
 
 ### Requirements
 * Python 3.7
